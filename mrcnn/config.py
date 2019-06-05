@@ -65,8 +65,8 @@ class Config(object):
     BACKBONE_STRIDES = [4, 8, 16, 32, 64]
 
     # Size of the fully-connected layers in the classification graph
-    # FPN_CLASSIF_FC_LAYERS_SIZE = 1024
-    FPN_CLASSIF_FC_LAYERS_SIZE = 512
+    FPN_CLASSIF_FC_LAYERS_SIZE = 1024
+    # FPN_CLASSIF_FC_LAYERS_SIZE = 512
 
     # Size of the top-down layers used to build the feature pyramid
     TOP_DOWN_PYRAMID_SIZE = 256
@@ -99,7 +99,7 @@ class Config(object):
 
     # ROIs kept after non-maximum suppression (training and inference)
     POST_NMS_ROIS_TRAINING = 2000
-    POST_NMS_ROIS_INFERENCE = 2000
+    POST_NMS_ROIS_INFERENCE = 1000
 
     # If enabled, resizes instance masks to a smaller size to reduce
     # memory load. Recommended when using high-resolution images.
@@ -211,6 +211,7 @@ class Config(object):
     #     False: Freeze BN layers. Good when using a small batch size
     #     True: (don't use). Set layer in training mode even when predicting
     TRAIN_BN = False  # Defaulting to False since batch size is often small
+    USE_BIAS = True  # in resnet use bias or not
 
     # Gradient norm clipping
     GRADIENT_CLIP_NORM = 5.0

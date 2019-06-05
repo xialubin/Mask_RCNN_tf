@@ -22,16 +22,20 @@ tf.keras.backend.set_learning_phase(True)
 MODEL_DIR = "./logs"
 
 # Local path to trained weights file
-COCO_MODEL_PATH = "./checkpoint1/model-13"
+COCO_MODEL_PATH = "./checkpoint/model-39"
 # Download COCO trained weights from Releases if needed
 
 # Directory of images to run detection on
 IMAGE_DIR = "./images"
 
-dataset_train = CocoDataset()
-dataset_train.load_coco('./coco', "train", year="2014", auto_download=False)
-dataset_train.load_coco('./coco', "valminusminival", year="2014", auto_download=False)
-dataset_train.prepare()
+# dataset_train = CocoDataset()
+# dataset_train.load_coco('./coco', "train", year="2014", auto_download=False)
+# dataset_train.load_coco('./coco', "valminusminival", year="2014", auto_download=False)
+# dataset_train.prepare()
+
+dataset_val = CocoDataset()
+dataset_val.load_coco('./coco', "val", year="2014", auto_download=False)
+dataset_val.prepare()
 
 
 class InferenceConfig(coco_train.CocoConfig):
@@ -73,14 +77,19 @@ class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
 file_names = next(os.walk(IMAGE_DIR))[2]
 image = skimage.io.imread(os.path.join(IMAGE_DIR, random.choice(file_names)))
 
-# Run detection
+# # Run detection
 # results = model.detect([image])
+# # Visualize results
+# r = results[0]
+# # visualize.display_images([r['images']])
+# visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
+#                             class_names, r['scores'])
 
 # detect1
-results = model.detect1(dataset_train)
-
+results = model.detect1(dataset_val)
+#
 # Visualize results
 r = results[0]
-visualize.display_images([r['images']])
+# visualize.display_images([r['images']])
 visualize.display_instances(r['images'], r['rois'], r['masks'], r['class_ids'],
                             class_names, r['scores'])

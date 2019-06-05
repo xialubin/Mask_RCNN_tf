@@ -74,7 +74,7 @@ class CocoConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
 
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
@@ -263,12 +263,12 @@ if __name__ == '__main__':
         #             augmentation=augmentation)
 
         # Training - all
-        print("Training network mrcnn")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE,
-                    epochs=10,  # 原来是40， 只训练一幅图像，所以用一个epoch就可以了，
-                    layers='all',
-                    augmentation=augmentation)
+        # print("Training network mrcnn")
+        # model.train(dataset_train, dataset_val,
+        #             learning_rate=config.LEARNING_RATE / 10,
+        #             epochs=40,  # 原来是40， 只训练一幅图像，所以用一个epoch就可以了，
+        #             layers='mrcnn',
+        #             augmentation=augmentation)
 
         # Training - Stage 1
         # print("Training network heads")
@@ -289,12 +289,12 @@ if __name__ == '__main__':
 
         # # Training - Stage 3
         # # Fine tune all layers
-        # print("Fine tune all layers")
-        # model.train(dataset_train, dataset_val,
-        #             learning_rate=config.LEARNING_RATE / 10,
-        #             epochs=160,
-        #             layers='all',
-        #             augmentation=augmentation)
+        print("Fine tune all layers")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE / 10,
+                    epochs=160,
+                    layers='all',
+                    augmentation=augmentation)
 
     elif args.command == "evaluate":
         # Validation dataset

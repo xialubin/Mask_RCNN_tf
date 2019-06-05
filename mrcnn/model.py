@@ -22,6 +22,7 @@ import tensorflow as tf
 from mrcnn import utils
 from mrcnn.net_util import *
 from skimage.transform import resize
+import time
 
 
 ############################################################
@@ -709,11 +710,12 @@ class MaskRCNN(object):
         self.config = config
         self.model_dir = model_dir
         self.model_input, self.model_output = self.build(mode=mode, config=config)
+        self.summaries = []
         sessconfig = tf.ConfigProto(allow_soft_placement=True)
         sessconfig.gpu_options.allow_growth = True
         self.sess = tf.Session(config=sessconfig)
-        self.summaries = []
-        self.summary_writer = tf.summary.FileWriter('./logs/', self.sess.graph)
+        self.saver = tf.train.Saver(max_to_keep=1)
+        # self.summary_writer = tf.summary.FileWriter('./logs/', self.sess.graph)
 
     def build(self, mode, config):
         """Build Mask R-CNN architecture.
@@ -776,7 +778,7 @@ class MaskRCNN(object):
                                                 train_bn=config.TRAIN_BN)
         else:
             _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
-                                             stage5=True, train_bn=config.TRAIN_BN)
+                                             stage5=True, train_bn=config.TRAIN_BN, use_bias=config.USE_BIAS)
         P5 = tf.layers.Conv2D(filters=config.TOP_DOWN_PYRAMID_SIZE, kernel_size=(1, 1), name='fpn_c5p5')(C5)
         P4 = tf.add(
             tf.keras.layers.UpSampling2D(size=(2, 2), name="fpn_p5upsampled")(P5),
@@ -851,10 +853,6 @@ class MaskRCNN(object):
                                  config=config)([rpn_class, rpn_bbox, anchors])
         # 接受rpn产生的scores、deltas和anchor，用scores选取一定数量的anchor，再用deltas对anchor进行调整
         # 再用非极大抑制对anchor进行筛选,输出感兴区域
-        self.rpn_rois1 = ProposalLayer(proposal_count=1000,
-                                 nms_threshold=config.RPN_NMS_THRESHOLD,
-                                 name="ROI",
-                                 config=config)([rpn_class, rpn_bbox, anchors])
 
         if mode == "training":
             # Class ID mask to mark class IDs supported by the dataset the image
@@ -895,13 +893,13 @@ class MaskRCNN(object):
 
             # Network Heads
             # TODO: verify that this handles zero padded ROIs
-            mrcnn_class_logits, mrcnn_class, mrcnn_bbox, self.res = \
+            mrcnn_class_logits, mrcnn_class, mrcnn_bbox = \
                 fpn_classifier_graph(rois, mrcnn_feature_maps, input_image_meta,
                                      config.POOL_SIZE, config.NUM_CLASSES,
                                      train_bn=config.TRAIN_BN,
                                      fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
 
-            mrcnn_mask, self.res1 = build_fpn_mask_graph(rois, mrcnn_feature_maps,
+            mrcnn_mask = build_fpn_mask_graph(rois, mrcnn_feature_maps,
                                               input_image_meta,
                                               config.MASK_POOL_SIZE,
                                               config.NUM_CLASSES,
@@ -937,14 +935,14 @@ class MaskRCNN(object):
                        rpn_rois, output_rois,
                        rpn_class_loss, rpn_bbox_loss, class_loss, bbox_loss, mask_loss]
         else:
-            ind = np.load('ind.npy').astype(np.int32)
-            ind = np.reshape(ind, (ind.shape[0], 1))
-            gather_ind = np.concatenate((np.zeros((ind.shape[0], 1)).astype(np.int32), ind), -1)
-            rpn_rois = tf.gather_nd(rpn_rois, gather_ind)
-            rpn_rois = tf.expand_dims(rpn_rois, 0)
+            # ind = np.load('ind.npy').astype(np.int32)
+            # ind = np.reshape(ind, (ind.shape[0], 1))
+            # gather_ind = np.concatenate((np.zeros((ind.shape[0], 1)).astype(np.int32), ind), -1)
+            # rpn_rois = tf.gather_nd(rpn_rois, gather_ind)
+            # rpn_rois = tf.expand_dims(rpn_rois, 0)
             # Network Heads
             # Proposal classifier and BBox regressor heads
-            mrcnn_class_logits, mrcnn_class, mrcnn_bbox, self.res =\
+            mrcnn_class_logits, mrcnn_class, mrcnn_bbox, =\
                 fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
                                      config.POOL_SIZE, config.NUM_CLASSES,
                                      train_bn=config.TRAIN_BN,
@@ -958,7 +956,7 @@ class MaskRCNN(object):
 
             # Create masks for detections
             detection_boxes = detections[..., :4]  # [batch, num_detections, (y1, x1, y2, x2)]
-            mrcnn_mask, self.res1 = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
+            mrcnn_mask = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
                                               input_image_meta,
                                               config.MASK_POOL_SIZE,
                                               config.NUM_CLASSES,
@@ -1001,24 +999,25 @@ class MaskRCNN(object):
         assert self.mode == "training", "Create model in training mode."
 
         # Data generators
+        train_generator = data_generator(train_dataset, self.config, shuffle=True,
+                                         augmentation=augmentation,
+                                         batch_size=self.config.BATCH_SIZE,
+                                         no_augmentation_sources=no_augmentation_sources)
         # train_generator = data_generator(train_dataset, self.config, shuffle=False,
-        #                                  augmentation=augmentation,
-        #                                  batch_size=self.config.BATCH_SIZE,
-        #                                  no_augmentation_sources=no_augmentation_sources)
-        train_generator = data_generator(train_dataset, self.config, shuffle=False,
-                                         batch_size=self.config.BATCH_SIZE)
+        #                                  batch_size=self.config.BATCH_SIZE)
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
                                        batch_size=self.config.BATCH_SIZE)
 
         self.optimize(layers, learning_rate)
-        self.sess.run(self.init)
+        self.sess.run(tf.global_variables_initializer())
+
+        self.summary_op = tf.summary.merge(self.summaries)
+        self.summary_writer = tf.summary.FileWriter('./logs/', self.sess.graph)
 
         # assign_ops = self.checkpoint_assign(path='./rpn_dic1.npy')
         # self.sess.run(assign_ops)
 
         # assign_ops = self.imagenet_assign()
-        # for assign_op in assign_ops:
-        #     self.sess.run(assign_op)
         # self.sess.run(assign_ops)
 
         # 抽出几个variable看看assign是否正常
@@ -1028,19 +1027,17 @@ class MaskRCNN(object):
         #         var.append(v)
         # var_np = self.sess.run(var)
 
-        self.saver = tf.train.Saver(max_to_keep=1)
-        self.summary_op = tf.summary.merge(self.summaries)
-        # self.saver.restore(self.sess, './checkpoint1/model-9')
+        self.saver.restore(self.sess, './checkpoint/model-159')
 
         single_train_inputs, _ = train_generator.__next__()
         single_val_inputs, _ = val_generator.__next__()
 
         for epoch in range(epochs):
             print("Epoch {}/{}.".format(epoch, epochs))
-            self.train_epoch(train_generator, epoch, single_inputs=single_train_inputs)
-            self.val_epoch(val_generator, epoch, single_inputs=single_val_inputs)
-            checkpoint_path = './checkpoint1/model'
-            self.saver.save(self.sess, checkpoint_path, global_step=10 + epoch)
+            self.train_epoch(train_generator, epoch, single_inputs=None)
+            self.val_epoch(val_generator, epoch, single_inputs=None)
+            checkpoint_path = './checkpoint/model'
+            self.saver.save(self.sess, checkpoint_path, global_step=epoch)
 
     def train_epoch(self, DataGenerator, epoch, single_inputs=None):
         steps = self.config.STEPS_PER_EPOCH
@@ -1077,6 +1074,7 @@ class MaskRCNN(object):
             input_gt_class_ids = self.model_input[5]
             input_gt_masks = self.model_input[6]
 
+            t1 = time.time()
             rpn_output, mrcnn_output, proposal_detectiontarget_roi, loss_list, DetectTarget_output, _ = \
                 self.sess.run([self.rpn_output, self.mrcnn_output,
                                self.Proposal_and_DetectionTarget_ROI, self.loss_list,
@@ -1089,26 +1087,24 @@ class MaskRCNN(object):
                                          input_gt_boxes: gt_boxes,
                                          input_gt_class_ids: gt_class_ids,
                                          input_gt_masks: gt_masks})
-            res, res1, rpn_roi1 = self.sess.run([self.res, self.res1, self.rpn_rois1], feed_dict={input_image: images,
-                                         input_image_meta: image_metas,
-                                         input_rpn_match: rpn_match,
-                                         input_rpn_bbox: rpn_bbox,
-                                         input_gt_boxes: gt_boxes,
-                                         input_gt_class_ids: gt_class_ids,
-                                         input_gt_masks: gt_masks})
-            # dic = {}
-            # dic['rpn_roi_2000'] = proposal_detectiontarget_roi[0]
-            # dic['rpn_roi_1000'] = rpn_roi1
-            # dic['detect_roi_200'] = proposal_detectiontarget_roi[1]
-            # np.save('rpn_roi_train_dic.npy', [dic])
-            # dic = {}
-            # dic['before_bn'] = res[1]
-            # dic['after_bn'] = res[2]
-            # np.save('res.npy', [dic])
+
+            # loss_list, _ = self.sess.run([self.loss_list, self.train_op],
+            #                              feed_dict={input_image: images,
+            #                                         input_image_meta: image_metas,
+            #                                         input_rpn_match: rpn_match,
+            #                                         input_rpn_bbox: rpn_bbox,
+            #                                         input_gt_boxes: gt_boxes,
+            #                                         input_gt_class_ids: gt_class_ids,
+            #                                         input_gt_masks: gt_masks})
+            t2 = time.time()
+            remain_time = (t2-t1) * ((160 - epoch) * steps + (steps - step)) / (60 * 60 * 24)
 
             sys.stdout.write('\rstep/steps:{}/{}; '
-                             '[rpn_class_loss: {:.4}, rpn_bbox_loss: {:.4}, class_loss: {:.4}, bbox_loss: {:.4}, mask_loss: {:.4}], image:{:.4}'.
-                             format(step, steps, loss_list[0], loss_list[1], loss_list[2], loss_list[3], loss_list[4], images[0, 256, 256, 0]))
+                             '[rpn_class_loss: {:.4}, rpn_bbox_loss: {:.4}, class_loss: {:.4}, bbox_loss: {:.4}, mask_loss: {:.4}]'
+                             '[compute_time: {:.4}] [remain_time: {:.4} days]'.
+                             format(step, steps,
+                                    loss_list[0], loss_list[1], loss_list[2], loss_list[3], loss_list[4],
+                                    (t2 - t1), remain_time))
 
             # statistic
             rpn_class_loss += loss_list[0] / steps
@@ -1213,25 +1209,37 @@ class MaskRCNN(object):
               4+: Train Resnet stage 4 and up
               5+: Train Resnet stage 5 and up
         """
+        # layer_regex = {
+        #     # all layers but the backbone
+        #     "heads": r"(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+        #     # From a specific Resnet stage and up
+        #     "3+": r"(res3.*)|(bn3.*)|(res4.*)|(bn4.*)|(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+        #     "4+": r"(res4.*)|(bn4.*)|(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+        #     "5+": r"(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+        #     # All layers
+        #     "all": ".*",
+        #     # only rpn
+        #     "rpn": r"(conv.*)|(res.*)|(bn.*)|(rpn\_.*)|(fpn\_.*)",
+        #     "mrcnn": r"(mrcnn\_.*)"
+        # }
+
         layer_regex = {
             # all layers but the backbone
             "heads": r"(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
             # From a specific Resnet stage and up
-            "3+": r"(res3.*)|(bn3.*)|(res4.*)|(bn4.*)|(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-            "4+": r"(res4.*)|(bn4.*)|(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
-            "5+": r"(res5.*)|(bn5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+            "3+": r"(scale3.*)|(scale4.*)|(scale5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+            "4+": r"(scale4.*)|(scale5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
+            "5+": r"(scale5.*)|(mrcnn\_.*)|(rpn\_.*)|(fpn\_.*)",
             # All layers
             "all": ".*",
             # only rpn
-            "rpn": r"(conv.*)|(res.*)|(bn.*)|(rpn\_.*)|(fpn\_.*)",
+            "rpn": r"(rpn\_.*)|(fpn\_.*)",
             "mrcnn": r"(mrcnn\_.*)"
         }
         layer_flag = layers
         if layers in layer_regex.keys():
             layers = layer_regex[layers]
         var_need_train = self.set_trainbale(layers_regex=layers)
-
-        global_step = tf.Variable(0, trainable=False)
 
         rpn_class_logits, rpn_class, rpn_bbox = self.model_output[0:3]
         self.rpn_output = [rpn_class_logits, rpn_class, rpn_bbox]
@@ -1254,13 +1262,25 @@ class MaskRCNN(object):
         self.summaries.append(tf.summary.scalar('class_loss', class_loss))
         self.summaries.append(tf.summary.scalar('bbox_loss', bbox_loss))
         self.summaries.append(tf.summary.scalar('mask_loss', mask_loss))
-        optim = tf.train.AdamOptimizer(learning_rate=learning_rate, beta2=0.99)
-        self.train_op = optim.minimize(loss_sum, global_step=global_step, var_list=var_need_train)
-        self.init = tf.global_variables_initializer()
+        global_step = tf.Variable(0, trainable=False)
+        start_learning_rate = learning_rate
+        learning_rate_decay = tf.train.exponential_decay(learning_rate=start_learning_rate, global_step=global_step,
+                                                   decay_steps=10000, decay_rate=0.9,
+                                                   staircase=True)
+        self.summaries.append(tf.summary.scalar('learning_rate', learning_rate_decay))
+        optim = tf.train.AdamOptimizer(learning_rate=learning_rate_decay, beta2=0.99)
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            self.apply_grad_op = optim.minimize(loss_sum, global_step=global_step, var_list=var_need_train)
+        ema = tf.train.ExponentialMovingAverage(decay=0.99, num_updates=global_step)
+        with tf.control_dependencies([self.apply_grad_op]):
+            self.variable_average_op = ema.apply(tf.trainable_variables())
+
+        self.train_op = tf.group(self.apply_grad_op, self.variable_average_op)
 
     def imagenet_assign(self):
         var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
-        weight = np.load('weight_new_store.npy')[0]
+        weight = np.load('resnet_weight_new_name.npy')[0]
         assign_op = []
         num = 0
         for var in var_list:
@@ -1456,13 +1476,13 @@ class MaskRCNN(object):
         return results
 
     def detect1(self, train_dataset):
-        train_generator = data_generator(train_dataset, self.config, shuffle=False,
-                                         batch_size=1)
+        data = data_generator(train_dataset, self.config, shuffle=True,
+                              batch_size=1)
 
-        single_train_inputs, _ = train_generator.__next__()
+        single_input, _ = data.__next__()
 
-        molded_images = single_train_inputs[0]
-        image_metas = single_train_inputs[1]
+        molded_images = single_input[0]
+        image_metas = single_input[1]
         windows = [image_metas[0][7:11].astype(np.int32)]
         original_shape = image_metas[0][1:4].astype(np.int32)
 
@@ -1485,10 +1505,6 @@ class MaskRCNN(object):
                           feed_dict={self.model_input[0]: molded_images,
                                      self.model_input[1]: image_metas,
                                      self.model_input[2]: anchors})
-        res, res1 = self.sess.run([self.res, self.res1],
-                                      feed_dict={self.model_input[0]: molded_images,
-                                                 self.model_input[1]: image_metas,
-                                                 self.model_input[2]: anchors})
         # dic = {}
         # dic['rpn_roi_200'] = rpn_rois
         # np.save('rpn_roi_detect_dic200.npy', [dic])
@@ -1499,7 +1515,8 @@ class MaskRCNN(object):
             self.unmold_detections(detections[i], mrcnn_mask[i],
                                    original_shape, molded_images[i].shape,
                                    windows[i])
-        original_image = unmold_image(molded_images[0], self.config)[85:427, :, :]
+        print(final_class_ids)
+        original_image = unmold_image(molded_images[0], self.config)[windows[0][0]:windows[0][2], windows[0][1]:windows[0][3], :]
         original_image = (resize(original_image, output_shape=original_shape) * 255).astype(np.uint8)
         results.append({
             "images": original_image,
@@ -1511,6 +1528,6 @@ class MaskRCNN(object):
         return results
 
     def detect_load_weight(self, path):
-        saver = tf.train.Saver()
-        saver.restore(self.sess, path)
+        # saver = tf.train.Saver()
+        self.saver.restore(self.sess, path)
 
