@@ -188,6 +188,7 @@ class Config(object):
 
     # Weight decay regularization
     WEIGHT_DECAY = 0.0001
+    # WEIGHT_DECAY = 0.01
 
     # Loss weights for more precise optimization.
     # Can be used for R-CNN training setup.
@@ -210,7 +211,7 @@ class Config(object):
     #     None: Train BN layers. This is the normal mode
     #     False: Freeze BN layers. Good when using a small batch size
     #     True: (don't use). Set layer in training mode even when predicting
-    TRAIN_BN = False  # Defaulting to False since batch size is often small
+    TRAIN_BN = True  # Defaulting to False since batch size is often small
     USE_BIAS = True  # in resnet use bias or not
 
     # Gradient norm clipping

@@ -56,7 +56,7 @@ import tensorflow as tf
 tf.keras.backend.set_learning_phase(True)
 
 # Path to trained weights file
-COCO_MODEL_PATH = os.path.join("./mask_rcnn_coco.h5")
+# COCO_MODEL_PATH = os.path.join("./mask_rcnn_coco.h5")
 
 # Directory to save logs and model checkpoints, if not provided
 # through the command line argument --logs
@@ -288,10 +288,11 @@ if __name__ == '__main__':
         #             augmentation=augmentation)
 
         # # Training - Stage 3
-        # # Fine tune all layers
+        # Fine tune all layers
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE / 10,
+                    # learning_rate=config.LEARNING_RATE / 20,
                     epochs=160,
                     layers='all',
                     augmentation=augmentation)

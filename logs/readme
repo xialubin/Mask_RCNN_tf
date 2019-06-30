@@ -1,0 +1,2 @@
+save logs file in this folder
+run "tensorboard --logdir logs" to watch the training process.

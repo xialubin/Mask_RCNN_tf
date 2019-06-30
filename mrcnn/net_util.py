@@ -151,132 +151,12 @@ def denorm_boxes_graph(boxes, shape):
     shift = tf.constant([0., 0., 1., 1.])
     return tf.cast(tf.round(tf.multiply(boxes, scale) + shift), tf.int32)
 
-'''
+
 ############################################################
 #  Resnet Graph
 ############################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block,
-                   use_bias=True, train_bn=True):
-    """The identity_block is the block that has no conv layer at shortcut
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: default 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-        use_bias: Boolean. To use or not use a bias in conv layers.
-        train_bn: Boolean. Train or freeze Batch Norm layers
-    """
-    nb_filter1, nb_filter2, nb_filter3 = filters
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
-
-    x = tf.layers.Conv2D(filters=nb_filter1, kernel_size=(1, 1), name=conv_name_base + '2a',
-                         use_bias=use_bias)(input_tensor)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2a')(x)
-    x = tf.nn.relu(x)
-
-    x = tf.layers.Conv2D(filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
-                         name=conv_name_base + '2b', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2b')(x)
-    x = tf.nn.relu(x)
-
-    x = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1), name=conv_name_base + '2c',
-                         use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2c')(x)
-
-    x = tf.add(x, input_tensor)
-    x = tf.nn.relu(x, name='res' + str(stage) + block + '_out')
-    return x
-
-
-def conv_block(input_tensor, kernel_size, filters, stage, block,
-               strides=(2, 2), use_bias=True, train_bn=True):
-    """conv_block is the block that has a conv layer at shortcut
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: default 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-        use_bias: Boolean. To use or not use a bias in conv layers.
-        train_bn: Boolean. Train or freeze Batch Norm layers
-    Note that from stage 3, the first conv layer at main path is with subsample=(2,2)
-    And the shortcut should have subsample=(2,2) as well
-    """
-    # 整个conv_block只下采样了一次
-    nb_filter1, nb_filter2, nb_filter3 = filters
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
-
-    x = tf.layers.Conv2D(filters=nb_filter1, kernel_size=(1, 1), strides=strides,  # 整个conv_block只下采样了一次
-                         name=conv_name_base + '2a', use_bias=use_bias)(input_tensor)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2a')(x)
-    x = tf.nn.relu(x)
-
-    x = tf.layers.Conv2D(filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
-                         name=conv_name_base + '2b', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2b')(x)
-    x = tf.nn.relu(x)
-
-    x = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1),
-                         name=conv_name_base + '2c', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=bn_name_base + '2c')(x)
-
-    shortcut = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1), strides=strides,
-                                name=conv_name_base + '1', use_bias=use_bias)(input_tensor)
-    shortcut = tf.layers.BatchNormalization(name=bn_name_base + '1')(shortcut)
-
-    x = tf.add(x, shortcut)
-    x = tf.nn.relu(x, name='res' + str(stage) + block + '_out')
-    return x
-
-
-def resnet_graph(input_image, architecture, stage5=False, train_bn=True):
-    """Build a ResNet graph.
-        architecture: Can be resnet50 or resnet101
-        stage5: Boolean. If False, stage5 of the network is not created
-        train_bn: Boolean. Train or freeze Batch Norm layers
-    """
-    assert architecture in ["resnet50", "resnet101"]
-    # Stage 1
-    x = tf.pad(input_image, paddings=[[0, 0], [3, 3], [3, 3], [0, 0]])
-    x = tf.layers.Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)
-    x = tf.layers.BatchNormalization(name='bn_conv1')(x)
-    x = tf.nn.relu(x)
-    C1 = x = tf.layers.MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)
-    # Stage 2
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn)  # 这里没有下采样
-    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b', train_bn=train_bn)
-    C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block='c', train_bn=train_bn)  # 上面从公下采样了2次，所以C2的stride为4
-    # Stage 3
-    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', train_bn=train_bn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b', train_bn=train_bn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c', train_bn=train_bn)
-    C3 = x = identity_block(x, 3, [128, 128, 512], stage=3, block='d', train_bn=train_bn)
-    # Stage 4
-    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', train_bn=train_bn)
-    block_count = {"resnet50": 5, "resnet101": 22}[architecture]
-    for i in range(block_count):
-        x = identity_block(x, 3, [256, 256, 1024], stage=4, block=chr(98 + i), train_bn=train_bn)
-    C4 = x
-    # Stage 5
-    if stage5:
-        x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', train_bn=train_bn)
-        x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', train_bn=train_bn)
-        C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn)
-    else:
-        C5 = None
-    return [C1, C2, C3, C4, C5]
-'''
-
-
-'''new Resnet name, and remove the conv bias'''
-############################################################
-#  Resnet Graph
-############################################################
-def identity_block(input_tensor, kernel_size, filters, stage, block,
-                   use_bias=True, train_bn=True):
+                   use_bias=True, train_bn=True, regularizer=None):
     """The identity_block is the block that has no conv layer at shortcut
     # Arguments
         input_tensor: input tensor
@@ -290,19 +170,19 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
     nb_filter1, nb_filter2, nb_filter3 = filters
     name_scope = 'scale' + str(stage) + '/' + 'block' + str(block) + '/'
 
-    x = tf.layers.Conv2D(filters=nb_filter1, kernel_size=(1, 1), name=name_scope + 'a_conv',
-                         use_bias=use_bias)(input_tensor)
-    x = tf.layers.BatchNormalization(name=name_scope + 'a_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(input_tensor, filters=nb_filter1, kernel_size=(1, 1), name=name_scope + 'a_conv',
+                         use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'a_bn', training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.layers.Conv2D(filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
-                         name=name_scope + 'b_conv', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=name_scope + 'b_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(x, filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
+                         name=name_scope + 'b_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'b_bn', training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1), name=name_scope + 'c_conv',
-                         use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=name_scope + 'c_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(x, filters=nb_filter3, kernel_size=(1, 1), name=name_scope + 'c_conv',
+                         use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'c_bn', training=train_bn)
 
     x = tf.add(x, input_tensor)
     x = tf.nn.relu(x, name=name_scope + 'out')
@@ -310,7 +190,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
 
 def conv_block(input_tensor, kernel_size, filters, stage, block,
-               strides=(2, 2), use_bias=True, train_bn=True):
+               strides=(2, 2), use_bias=True, train_bn=True, regularizer=None):
     """conv_block is the block that has a conv layer at shortcut
     # Arguments
         input_tensor: input tensor
@@ -327,30 +207,30 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     nb_filter1, nb_filter2, nb_filter3 = filters
     name_scope = 'scale' + str(stage) + '/' + 'block' + str(block) + '/'
 
-    x = tf.layers.Conv2D(filters=nb_filter1, kernel_size=(1, 1), strides=strides,  # 整个conv_block只下采样了一次
-                         name=name_scope + 'a_conv', use_bias=use_bias)(input_tensor)
-    x = tf.layers.BatchNormalization(name=name_scope + 'a_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(input_tensor, filters=nb_filter1, kernel_size=(1, 1), strides=strides,  # 整个conv_block只下采样了一次
+                         name=name_scope + 'a_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'a_bn', training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.layers.Conv2D(filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
-                         name=name_scope + 'b_conv', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=name_scope + 'b_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(x, filters=nb_filter2, kernel_size=(kernel_size, kernel_size), padding='same',
+                         name=name_scope + 'b_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'b_bn', training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1),
-                         name=name_scope + 'c_conv', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name=name_scope + 'c_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(x, filters=nb_filter3, kernel_size=(1, 1),
+                         name=name_scope + 'c_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, name=name_scope + 'c_bn', training=train_bn)
 
-    shortcut = tf.layers.Conv2D(filters=nb_filter3, kernel_size=(1, 1), strides=strides,
-                                name=name_scope + 'shortcut_conv', use_bias=use_bias)(input_tensor)
-    shortcut = tf.layers.BatchNormalization(name=name_scope + 'shortcut_bn')(shortcut, training=train_bn)
+    shortcut = tf.layers.conv2d(input_tensor, filters=nb_filter3, kernel_size=(1, 1), strides=strides,
+                                name=name_scope + 'shortcut_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    shortcut = tf.layers.batch_normalization(shortcut, name=name_scope + 'shortcut_bn', training=train_bn)
 
     x = tf.add(x, shortcut)
     x = tf.nn.relu(x, name=name_scope + 'out')
     return x
 
 
-def resnet_graph(input_image, architecture, stage5=False, train_bn=True, use_bias=True):
+def resnet_graph(input_image, architecture, stage5=False, train_bn=True, use_bias=True, regularizer=None):
     """Build a ResNet graph.
         architecture: Can be resnet50 or resnet101
         stage5: Boolean. If False, stage5 of the network is not created
@@ -359,12 +239,12 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True, use_bia
     assert architecture in ["resnet50", "resnet101"]
     # Stage 1
     x = tf.pad(input_image, paddings=[[0, 0], [3, 3], [3, 3], [0, 0]])
-    x = tf.layers.Conv2D(64, (7, 7), strides=(2, 2), name='scale1_conv', use_bias=use_bias)(x)
-    x = tf.layers.BatchNormalization(name='scale1_bn')(x, training=train_bn)
+    x = tf.layers.conv2d(x, 64, (7, 7), strides=(2, 2), name='scale1_conv', use_bias=use_bias, kernel_regularizer=regularizer)
+    x = tf.layers.batch_normalization(x, training=train_bn, name='scale1_bn')
     x = tf.nn.relu(x)
-    C1 = x = tf.layers.MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)
+    C1 = x = tf.layers.max_pooling2d(x, (3, 3), strides=(2, 2), padding="same")
     # Stage 2
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block=1, strides=(1, 1), use_bias=use_bias, train_bn=train_bn)  # 这里没有下采样
+    x = conv_block(x, 3, [64, 64, 256], stage=2, block=1, strides=(1, 1), use_bias=use_bias, train_bn=train_bn, regularizer=regularizer)  # 这里没有下采样
     x = identity_block(x, 3, [64, 64, 256], stage=2, block=2, use_bias=use_bias, train_bn=train_bn)
     C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block=3, use_bias=use_bias, train_bn=train_bn)  # 上面从公下采样了2次，所以C2的stride为4
     # Stage 3
@@ -391,7 +271,7 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True, use_bia
 ############################################################
 #  Region Proposal Network (RPN)
 ############################################################
-def rpn_graph(feature_map, anchors_per_location, anchor_stride, reuse=False):
+def rpn_graph(feature_map, anchors_per_location, anchor_stride, reuse=False, regularizer=None):
     """Builds the computation graph of Region Proposal Network.
 
     feature_map: backbone features [batch, height, width, depth]
@@ -409,12 +289,12 @@ def rpn_graph(feature_map, anchors_per_location, anchor_stride, reuse=False):
     # is not even.
     # Shared convolutional base of the RPN
     shared = tf.layers.conv2d(inputs=feature_map, filters=512, kernel_size=(3, 3), padding='same',
-                              strides=anchor_stride, name='rpn_conv_shared', reuse=reuse)
+                              strides=anchor_stride, name='rpn_conv_shared', reuse=reuse, kernel_regularizer=regularizer)
     shared = tf.nn.relu(shared)
 
     # Anchor Score. [batch, height, width, anchors per location * 2].
     x = tf.layers.conv2d(inputs=shared, filters=2 * anchors_per_location, kernel_size=(1, 1), padding='valid',
-                         name='rpn_class_raw', reuse=reuse)
+                         name='rpn_class_raw', reuse=reuse, kernel_regularizer=regularizer)
 
     # Reshape to [batch, anchors, 2]
     rpn_class_logits = tf.reshape(x, [tf.shape(x)[0], -1, 2])
@@ -425,7 +305,7 @@ def rpn_graph(feature_map, anchors_per_location, anchor_stride, reuse=False):
     # Bounding box refinement. [batch, H, W, anchors per location * depth]
     # where depth is [x, y, log(w), log(h)]
     x = tf.layers.conv2d(inputs=shared, filters=anchors_per_location * 4, kernel_size=(1, 1), padding="valid",
-                         name='rpn_bbox_pred', reuse=reuse)
+                         name='rpn_bbox_pred', reuse=reuse, kernel_regularizer=regularizer)
 
     # Reshape to [batch, anchors, 4]
     rpn_bbox = tf.reshape(x, [tf.shape(x)[0], -1, 4])
@@ -433,7 +313,7 @@ def rpn_graph(feature_map, anchors_per_location, anchor_stride, reuse=False):
     return [rpn_class_logits, rpn_probs, rpn_bbox]
 
 
-def rpn_model(input_feature_map, anchor_stride, anchors_per_location, reuse=False):
+def rpn_model(input_feature_map, anchor_stride, anchors_per_location, reuse=False, regularizer=None):
     """Builds a Keras model of the Region Proposal Network.
     It wraps the RPN graph so it can be used multiple times with shared
     weights.
@@ -449,7 +329,7 @@ def rpn_model(input_feature_map, anchor_stride, anchors_per_location, reuse=Fals
     rpn_bbox: [batch, H * W * anchors_per_location, (dy, dx, log(dh), log(dw))] Deltas to be
                 applied to anchors.
     """
-    outputs = rpn_graph(input_feature_map, anchors_per_location, anchor_stride, reuse)
+    outputs = rpn_graph(input_feature_map, anchors_per_location, anchor_stride, reuse, regularizer=regularizer)
     return outputs
 
 
@@ -937,7 +817,7 @@ class PyramidROIAlign(object):
 ############################################################
 def fpn_classifier_graph(rois, feature_maps, image_meta,
                          pool_size, num_classes, train_bn=True,
-                         fc_layers_size=1024):
+                         fc_layers_size=1024, regularizer=None):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
 
@@ -960,26 +840,70 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     # ROI Pooling
     # Shape: [batch, num_rois, POOL_SIZE, POOL_SIZE, channels]
     x = PyramidROIAlign([pool_size, pool_size], name="roi_align_classifier")([rois, image_meta] + feature_maps)
+    # x_unstack = tf.unstack(x, axis=1)  # x_in: [batch, POOL_SIZE, POOL_SIZE, channels]
+    # reuse = False
+    # mrcnn_class_logits_out = []
+    # mrcnn_probs_out = []
+    # mrcnn_bbox_out = []
+    # for i in range(200):
+    #     # Two 1024 FC layers (implemented with Conv2D for consistency)
+    #     x_in = x[:, i, :, :, :]
+    #     x_in = tf.layers.conv2d(x_in, fc_layers_size, (pool_size, pool_size), padding="valid",
+    #                             kernel_regularizer=regularizer, name='mrcnn_class_conv1', reuse=reuse)
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_class_bn1', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #     x_in = tf.layers.conv2d(x_in, fc_layers_size, (1, 1), padding="same",
+    #                             kernel_regularizer=regularizer, name='mrcnn_class_conv2', reuse=reuse)
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_class_bn2', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #
+    #     shared = tf.squeeze(tf.squeeze(x_in, 2), 1, name='pool_squeeze')
+    #
+    #     # Classifier head
+    #     mrcnn_class_logits_in = tf.layers.dense(shared, num_classes, kernel_regularizer=regularizer,
+    #                                          name='mrcnn_class_logits', reuse=reuse)
+    #     mrcnn_probs_in = tf.nn.softmax(mrcnn_class_logits_in, name='mrcnn_class')
+    #     mrcnn_class_logits_out.append(mrcnn_class_logits_in)
+    #     mrcnn_probs_out.append(mrcnn_probs_in)
+    #
+    #     # BBox head
+    #     # [batch, NUM_CLASSES * (dy, dx, log(dh), log(dw))]
+    #     x_in = tf.layers.dense(shared, num_classes*4, kernel_regularizer=regularizer,
+    #                            name='mrcnn_bbox_fc', reuse=reuse)
+    #     shape = tf.shape(x_in)
+    #     mrcnn_bbox_in = tf.reshape(x_in, [shape[0], num_classes, 4], name='mrcnn_bbox')
+    #     mrcnn_bbox_out.append(mrcnn_bbox_in)
+    #
+    #     reuse = True
+    #
+    # mrcnn_class_logits = tf.stack(mrcnn_class_logits_out, axis=1)
+    # mrcnn_probs = tf.stack(mrcnn_probs_out, axis=1)
+    # mrcnn_bbox = tf.stack(mrcnn_bbox_out, axis=1)
+
     # Two 1024 FC layers (implemented with Conv2D for consistency)
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid", kernel_regularizer=regularizer),
                                         name="mrcnn_class_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(), name='mrcnn_class_bn1')(x, training=train_bn)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_class_bn1')(x, training=train_bn)
     x = tf.nn.relu(x)
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(fc_layers_size, (1, 1)), name="mrcnn_class_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(), name='mrcnn_class_bn2')(x, training=train_bn)
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(fc_layers_size, (1, 1), kernel_regularizer=regularizer),
+                                        name="mrcnn_class_conv2")(x)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_class_bn2')(x, training=train_bn)
     x = tf.nn.relu(x)
 
     shared = tf.squeeze(tf.squeeze(x, 3), 2, name="pool_squeeze")
 
     # Classifier head
-    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.layers.Dense(num_classes),
+    mrcnn_class_logits = tf.keras.layers.TimeDistributed(tf.layers.Dense(num_classes, kernel_regularizer=regularizer),
                                                          name='mrcnn_class_logits')(shared)
     mrcnn_probs = tf.keras.layers.TimeDistributed(tf.keras.layers.Activation("softmax"),
                                                   name="mrcnn_class")(mrcnn_class_logits)
 
     # BBox head
     # [batch, num_rois, NUM_CLASSES * (dy, dx, log(dh), log(dw))]
-    x = tf.keras.layers.TimeDistributed(tf.layers.Dense(num_classes * 4), name='mrcnn_bbox_fc')(shared)
+    x = tf.keras.layers.TimeDistributed(tf.layers.Dense(num_classes * 4, kernel_regularizer=regularizer),
+                                        name='mrcnn_bbox_fc')(shared)
     # Reshape to [batch, num_rois, NUM_CLASSES, (dy, dx, log(dh), log(dw))]
     s = tf.shape(x)
     mrcnn_bbox = tf.reshape(x, shape=[s[0], s[1], num_classes, 4], name="mrcnn_bbox")
@@ -988,7 +912,7 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
 
 
 def build_fpn_mask_graph(rois, feature_maps, image_meta,
-                         pool_size, num_classes, train_bn=True):
+                         pool_size, num_classes, train_bn=True, regularizer=None):
     """Builds the computation graph of the mask head of Feature Pyramid Network.
 
     rois: [batch, num_rois, (y1, x1, y2, x2)] Proposal boxes in normalized
@@ -1006,33 +930,68 @@ def build_fpn_mask_graph(rois, feature_maps, image_meta,
     # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
     x = PyramidROIAlign([pool_size, pool_size],
                         name="roi_align_mask")([rois, image_meta] + feature_maps)
+    # x_unstack = tf.unstack(x, axis=1)  # x_in: [batch, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
+    # reuse = False
+    # x_out = []
+    # for i in range(200):
+    #     x_in = x[:, i, :, :, :]
+    #     x_in = tf.layers.conv2d(x_in, 256, (3, 3), padding="same", reuse=reuse,
+    #                             kernel_regularizer=regularizer, name='mrcnn_mask_conv1')
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_mask_bn1', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #
+    #     x_in = tf.layers.conv2d(x_in, 256, (3, 3), padding="same", reuse=reuse,
+    #                             kernel_regularizer=regularizer, name='mrcnn_mask_conv2')
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_mask_bn2', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #
+    #     x_in = tf.layers.conv2d(x_in, 256, (3, 3), padding="same", reuse=reuse,
+    #                             kernel_regularizer=regularizer, name='mrcnn_mask_conv3')
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_mask_bn3', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #
+    #     x_in = tf.layers.conv2d(x_in, 256, (3, 3), padding="same", reuse=reuse,
+    #                             kernel_regularizer=regularizer, name='mrcnn_mask_conv4')
+    #     x_in = tf.layers.batch_normalization(x_in, name='mrcnn_mask_bn4', training=train_bn, reuse=reuse)
+    #     x_in = tf.nn.relu(x_in)
+    #
+    #     x_in = tf.layers.conv2d_transpose(x_in, 256, (2, 2), strides=2, reuse=reuse,
+    #                                       kernel_regularizer=regularizer, name='mrcnn_mask_deconv')
+    #     x_in = tf.nn.relu(x_in)
+    #     x_in = tf.layers.conv2d(x_in, num_classes, (1, 1), strides=1, name='mrcnn_mask', reuse=reuse)
+    #     x_in = tf.nn.sigmoid(x_in)
+    #
+    #     x_out.append(x_in)
+    #     reuse = True
+    #
+    # x = tf.stack(x_out, axis=1)
 
     # Conv layers
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same", kernel_regularizer=regularizer),
                                         name="mrcnn_mask_conv1")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
-                                        name='mrcnn_mask_bn1')(x, training=train_bn)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_mask_bn1')(x, training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same", kernel_regularizer=regularizer),
                                         name="mrcnn_mask_conv2")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
-                                        name='mrcnn_mask_bn2')(x, training=train_bn)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_mask_bn2')(x, training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same", kernel_regularizer=regularizer),
                                         name="mrcnn_mask_conv3")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
-                                        name='mrcnn_mask_bn3')(x, training=train_bn)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_mask_bn3')(x, training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same"),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(256, (3, 3), padding="same", kernel_regularizer=regularizer),
                                         name="mrcnn_mask_conv4")(x)
-    x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
-                                        name='mrcnn_mask_bn4')(x, training=train_bn)
+    # x = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization(),
+    #                                     name='mrcnn_mask_bn4')(x, training=train_bn)
     x = tf.nn.relu(x)
 
-    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2DTranspose(256, (2, 2), strides=2),
+    x = tf.keras.layers.TimeDistributed(tf.layers.Conv2DTranspose(256, (2, 2), strides=2, kernel_regularizer=regularizer),
                                         name="mrcnn_mask_deconv")(x)
     x = tf.nn.relu(x)
     x = tf.keras.layers.TimeDistributed(tf.layers.Conv2D(num_classes, (1, 1), strides=1),

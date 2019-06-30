@@ -1,0 +1,5 @@
+put your dataset in this folder
+contains three sub-folders: train2014, val2014, annotations
+the sub-folder "train2014" contains all training images
+the sub-folder "val2014" contrains all validation images
+the sub-folder "annotations" contrains annotation files, please download from coco officail website. this programme needs captions_train2014.json, captions_val2014, instances_minival2014.json, instances_train2014.json and instance_valminusminival2014.json.

@@ -1,0 +1,5 @@
+The checkpoint will be saved in this folder
+include three file:
+model.data-00000-of-00001
+model.index
+mode.meta
